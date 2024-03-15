@@ -1,6 +1,6 @@
+use rand::{distributions::Alphanumeric, Rng};
 use sha2::{Digest, Sha256};
 use substring::Substring;
-use rand::{distributions::Alphanumeric, Rng};
 
 const DISKS: u32 = 12;
 const WEIGHT: u32 = 5;
@@ -28,7 +28,7 @@ impl ConsistentHash {
         //println!("INFO: Adding {}.", &path);
         let hash = hash_32(&path);
         let mut idx: usize = hash as usize % self.hashmap.len();
-        while ! self.hashmap[idx].is_empty() {
+        while !self.hashmap[idx].is_empty() {
             println!("WARNING: Conflicting hash at index: {}", idx);
             idx += 1;
         }
@@ -40,17 +40,17 @@ impl ConsistentHash {
         let mut idx = hash % self.hashmap.len();
         //println!("Finding at initial index {}...", idx);
         while self.hashmap[idx].is_empty() {
-            idx +=1;
+            idx += 1;
             if idx >= self.hashmap.len() {
                 //println!("INFO: Search wrapped.");
                 idx = 0;
             }
-            self.tries +=1;
+            self.tries += 1;
         }
         let cidx = self.hashmap[idx].chars().position(|c| c == '-').unwrap();
-        self.hashmap[idx].substring(0,cidx).to_string()
+        self.hashmap[idx].substring(0, cidx).to_string()
     }
-    
+
     pub fn remove(&mut self, item: &String) {
         println!("Removing {}.", item);
         for n in 0..self.hashmap.len() {
@@ -59,9 +59,14 @@ impl ConsistentHash {
             }
         }
     }
-    
+
     pub fn print_stats(&self) {
-        println!("{} requests with {} tries, {:.02} tries/request.", self.count, self.tries, self.tries as f64 / self.count as f64);
+        println!(
+            "{} requests with {} tries, {:.02} tries/request.",
+            self.count,
+            self.tries,
+            self.tries as f64 / self.count as f64
+        );
     }
 }
 
@@ -74,7 +79,10 @@ fn hash_32(item: &String) -> u32 {
 
 fn extract_disk(path: &str) -> u32 {
     let cidx = path.chars().count() - path.chars().rev().position(|c| c == '/').unwrap();
-    path.substring(cidx,path.len()).to_string().parse().unwrap()
+    path.substring(cidx, path.len())
+        .to_string()
+        .parse()
+        .unwrap()
 }
 
 fn modulo_hash(file: &String, num_disks: u32) -> u32 {
@@ -106,7 +114,7 @@ fn main() {
     let mut m_less_c = 0;
     let mut c_more_c = 0;
     let mut m_more_c = 0;
-    
+
     // Get the distribution with normal devices online
     for nf in 0..NUM_FILES as usize {
         let s: String = rand::thread_rng()
@@ -167,20 +175,34 @@ fn main() {
     }
 
     // Print out the staticstics
-    println!("Number of files: {} Optimal files per disk: {:.2}", NUM_FILES, NUM_FILES as f64 / DISKS as f64);
+    println!(
+        "Number of files: {} Optimal files per disk: {:.2}",
+        NUM_FILES,
+        NUM_FILES as f64 / DISKS as f64
+    );
     println!("File\t\tC\tM\tCl\tMl\tCm\tMm");
     for nf in 0..NUM_FILES as usize {
-        println!("{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            files[nf], c_nor[nf], m_nor[nf], c_less[nf], m_less[nf], c_more[nf], m_more[nf]);
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            files[nf], c_nor[nf], m_nor[nf], c_less[nf], m_less[nf], c_more[nf], m_more[nf]
+        );
     }
-    println!("Changes\t\t--\t--\t{} {}%\t{} {}%\t{} {}%\t{} {}%",
-            c_less_c, c_less_c * 100 / NUM_FILES,
-            m_less_c, m_less_c * 100 / NUM_FILES,
-            c_more_c, c_more_c * 100 / NUM_FILES,
-            m_more_c, m_more_c * 100 / NUM_FILES);
+    println!(
+        "Changes\t\t--\t--\t{} {}%\t{} {}%\t{} {}%\t{} {}%",
+        c_less_c,
+        c_less_c * 100 / NUM_FILES,
+        m_less_c,
+        m_less_c * 100 / NUM_FILES,
+        c_more_c,
+        c_more_c * 100 / NUM_FILES,
+        m_more_c,
+        m_more_c * 100 / NUM_FILES
+    );
     for d in 0..(DISKS + 1) as usize {
-        println!("Disk {}\t\t{}\t{}\t{}\t{}\t{}\t{}",
-            d,c_nor_d[d], m_nor_d[d], c_less_d[d], m_less_d[d], c_more_d[d], m_more_d[d]);
+        println!(
+            "Disk {}\t\t{}\t{}\t{}\t{}\t{}\t{}",
+            d, c_nor_d[d], m_nor_d[d], c_less_d[d], m_less_d[d], c_more_d[d], m_more_d[d]
+        );
     }
     ch.print_stats();
     //println!("Hashmap: {:#?}", ch);
