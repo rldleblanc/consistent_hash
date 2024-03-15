@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'consistent_hash'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=consistent_hash",
+                    "--package=consistent_hash"
+                ],
+                "filter": {
+                    "name": "consistent_hash",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'consistent_hash'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=consistent_hash",
+                    "--package=consistent_hash"
+                ],
+                "filter": {
+                    "name": "consistent_hash",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
