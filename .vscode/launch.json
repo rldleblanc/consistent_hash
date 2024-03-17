@@ -7,15 +7,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'consistent_hash'",
+            "name": "Debug executable 'consistent_hash_test'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=consistent_hash",
-                    "--package=consistent_hash"
+                    "--bin=consistent_hash_test",
+                    "--package=consistent_hash_test"
                 ],
                 "filter": {
-                    "name": "consistent_hash",
+                    "name": "consistent_hash_test",
                     "kind": "bin"
                 }
             },
@@ -25,16 +25,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'consistent_hash'",
+            "name": "Debug unit tests in executable 'consistent_hash_test'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=consistent_hash",
-                    "--package=consistent_hash"
+                    "--bin=consistent_hash_test",
+                    "--package=consistent_hash_test"
                 ],
                 "filter": {
-                    "name": "consistent_hash",
+                    "name": "consistent_hash_test",
                     "kind": "bin"
                 }
             },

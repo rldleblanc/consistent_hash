@@ -1,108 +1,44 @@
+use consistent_hash::{DefaultHash, Node, StaticHashRing};
 use murmur3::murmur3_32;
 use rand::{distributions::Alphanumeric, Rng};
 use std::io::Cursor;
-use substring::Substring;
 
-const DISKS: u32 = 12;
-const WEIGHT: u32 = 5;
-// DISK * WEIGHT * VEC_MULT = Vector size
-const VEC_MULT: u32 = 20;
-const NUM_FILES: u32 = 1000;
+const DISKS: u8 = 12;
+const WEIGHT: u8 = 160;
+const NUM_FILES: u32 = 100000000;
 // Limit the number of files displayed.
 const LIMIT_FILES: u32 = 100;
 
-#[derive(Debug)]
-struct ConsistentHash {
-    hashmap: Vec<String>,
-    tries: i32,
-    count: i32,
-    finalized: bool,
-    size: usize,
+struct MyChash<'a> {
+    ring: StaticHashRing<'a, u8, (), DefaultHash>,
+    bad_disks: Vec<u8>,
 }
 
-impl ConsistentHash {
-    pub fn new(num: u32) -> ConsistentHash {
-        println!("Creating vector with size: {}", num);
-        ConsistentHash {
-            hashmap: vec!["".to_string(); num as usize],
-            tries: 0,
-            count: 0,
-            finalized: false,
-            size: num as usize,
-        }
-    }
-    pub fn add(&mut self, path: &String, weight: u32) {
-        //println!("INFO: Adding {}.", &path);
-        assert!(
-            !self.finalized,
-            "Can't add to a finalized set, drop and recreate."
-        );
-        let hash = hash_mur32(path, weight);
-        let path = format!("{}-{:03}", &path, weight);
-        let mut idx: usize = hash as usize % self.hashmap.len();
-        while !self.hashmap[idx].is_empty() {
-            println!("WARNING: Conflicting hash at index: {}", idx);
-            idx += 1;
-        }
-        self.hashmap[idx] = path;
-    }
-    pub fn finalize(&mut self) {
-        let mut i = 0;
-        if self.hashmap[self.hashmap.len() - 1].is_empty() {
-            while self.hashmap[i].is_empty() {
-                i += 1;
-            }
-        } else {
-            i = self.hashmap.len() - 1;
-        }
-        let mut target = self.hashmap[i].to_string();
-        for i in (0..self.hashmap.len()).rev() {
-            if self.hashmap[i].is_empty() {
-                self.hashmap[i] = target.to_string();
-            } else {
-                target = self.hashmap[i].to_string();
-            }
-        }
-        self.finalized = true;
-    }
-    pub fn clear(&mut self) {
-        self.hashmap = vec!["".to_string(); self.size];
-        self.finalized = false;
-    }
-    pub fn find_entity(&mut self, item: &String) -> String {
-        self.count += 1;
-        let hash: usize = hash_mur32(item, 0) as usize;
-        let mut idx = hash % self.hashmap.len();
-        //println!("Finding at initial index {}...", idx);
-        self.tries += 1;
-        while self.hashmap[idx].is_empty() {
-            idx += 1;
-            if idx >= self.hashmap.len() {
-                //println!("INFO: Search wrapped.");
-                idx = 0;
-            }
-            self.tries += 1;
-        }
-        let cidx = self.hashmap[idx].chars().position(|c| c == '-').unwrap();
-        self.hashmap[idx].substring(0, cidx).to_string()
-    }
-
-    pub fn remove(&mut self, item: &String) {
-        println!("Removing {}.", item);
-        for n in 0..self.hashmap.len() {
-            if self.hashmap[n].starts_with(item) {
-                self.hashmap[n] = "".to_string();
-            }
+impl MyChash<'_> {
+    pub fn new(disks: Vec<Node<u8, ()>>) -> MyChash<'static> {
+        MyChash {
+            ring: StaticHashRing::new(DefaultHash, disks.into_iter()),
+            bad_disks: Vec::new(),
         }
     }
 
-    pub fn print_stats(&self) {
-        println!(
-            "{} requests with {} tries, {:.02} tries/request.",
-            self.count,
-            self.tries,
-            self.tries as f64 / self.count as f64
-        );
+    pub fn fail_disk(&mut self, disk: u8) {
+        self.bad_disks.push(disk);
+        self.bad_disks.sort();
+    }
+
+    pub fn get_disk(&self, file: &String) -> Option<u8> {
+        for candidate in self.ring.calc_candidates(file) {
+            let disk = self.bad_disks.binary_search(&candidate.key);
+            match disk {
+                Err(_) => return Some(candidate.key),
+                _ => {
+                    //println!("Skipping failed disk {}!", candidate.key);
+                    continue;
+                }
+            };
+        }
+        None
     }
 }
 
@@ -110,30 +46,20 @@ fn hash_mur32(item: &String, weight: u32) -> u32 {
     murmur3_32(&mut Cursor::new(item), weight).expect("Could not hash!")
 }
 
-fn extract_disk(path: &str) -> u32 {
-    let cidx = path.chars().count() - path.chars().rev().position(|c| c == '/').unwrap();
-    path.substring(cidx, path.len())
-        .to_string()
-        .parse()
-        .unwrap()
+fn modulo_hash(file: &String, num_disks: u8) -> u8 {
+    (hash_mur32(file, 0) % num_disks as u32).try_into().unwrap()
 }
 
-fn modulo_hash(file: &String, num_disks: u32) -> u32 {
-    hash_mur32(file, 0) % num_disks
-}
-
-fn cons_add_disks(ch: &mut ConsistentHash, disks: u32, weight: u32) {
+fn add_disks(nodes: &mut Vec<Node<u8, ()>>, disks: u8, weight: u8) {
     for d in 0..disks {
-        for w in 0..weight {
-            ch.add(&format!("/mnt/cache/{}", d), w);
-        }
+        nodes.push(Node::new(d).quantity(weight as usize));
     }
 }
 
 fn main() {
-    let mut ch = ConsistentHash::new(DISKS * WEIGHT * VEC_MULT);
-    cons_add_disks(&mut ch, DISKS, WEIGHT);
-    ch.finalize();
+    let mut nodes = Vec::new();
+    add_disks(&mut nodes, DISKS, WEIGHT);
+    let mut my_ring = MyChash::new(nodes);
     let mut files = Vec::with_capacity(NUM_FILES as usize);
     let mut c_nor = Vec::with_capacity(NUM_FILES as usize);
     let mut m_nor = Vec::with_capacity(NUM_FILES as usize);
@@ -160,7 +86,7 @@ fn main() {
             .map(char::from)
             .collect();
         files.push(s);
-        let target = extract_disk(&ch.find_entity(&files[nf]));
+        let target = my_ring.get_disk(&files[nf]).unwrap();
         c_nor.push(target);
         c_nor_d[target as usize] += 1;
         let target = modulo_hash(&files[nf], DISKS);
@@ -169,11 +95,11 @@ fn main() {
     }
 
     // Get the distribution if one device goes offline
-    let rdisk = rand::thread_rng().gen_range(0..DISKS);
-    ch.remove(&format!("/mnt/cache/{}", rdisk));
-    ch.finalize();
+    let rdisk: u8 = rand::thread_rng().gen_range(0..DISKS);
+    println!("Removing disk: {}", rdisk);
+    my_ring.fail_disk(rdisk);
     for nf in 0..NUM_FILES as usize {
-        let target = extract_disk(&ch.find_entity(&files[nf]));
+        let target = my_ring.get_disk(&files[nf]).unwrap();
         c_less.push(target);
         c_less_d[target as usize] += 1;
         let target = modulo_hash(&files[nf], DISKS - 1);
@@ -188,11 +114,11 @@ fn main() {
     }
 
     // Get the distribution if one device is added to the normal set
-    ch.clear();
-    cons_add_disks(&mut ch, DISKS + 1, WEIGHT);
-    ch.finalize();
+    let mut nodes = Vec::new();
+    add_disks(&mut nodes, DISKS + 1, WEIGHT);
+    let my_ring = MyChash::new(nodes);
     for nf in 0..NUM_FILES as usize {
-        let target = extract_disk(&ch.find_entity(&files[nf]));
+        let target = my_ring.get_disk(&files[nf]).unwrap();
         c_more.push(target);
         c_more_d[target as usize] += 1;
         let target = modulo_hash(&files[nf], DISKS + 1);
@@ -245,6 +171,4 @@ fn main() {
         "Disk {}\t\t-\t-\t-\t-\t{}\t{}",
         DISKS as usize, c_more_d[DISKS as usize], m_more_d[DISKS as usize]
     );
-    ch.print_stats();
-    //println!("Hashmap: {:#?}", ch);
 }
