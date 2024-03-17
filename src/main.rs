@@ -1,5 +1,6 @@
+use murmur3::murmur3_32;
 use rand::{distributions::Alphanumeric, Rng};
-use sha2::{Digest, Sha256};
+use std::io::Cursor;
 use substring::Substring;
 
 const DISKS: u32 = 12;
@@ -28,13 +29,14 @@ impl ConsistentHash {
             size: num as usize,
         }
     }
-    pub fn add(&mut self, path: String) {
+    pub fn add(&mut self, path: &String, weight: u32) {
         //println!("INFO: Adding {}.", &path);
         assert!(
             !self.finalized,
             "Can't add to a finalized set, drop and recreate."
         );
-        let hash = hash_32(&path);
+        let hash = hash_mur32(path, weight);
+        let path = format!("{}-{:03}", &path, weight);
         let mut idx: usize = hash as usize % self.hashmap.len();
         while !self.hashmap[idx].is_empty() {
             println!("WARNING: Conflicting hash at index: {}", idx);
@@ -67,7 +69,7 @@ impl ConsistentHash {
     }
     pub fn find_entity(&mut self, item: &String) -> String {
         self.count += 1;
-        let hash: usize = hash_32(item) as usize;
+        let hash: usize = hash_mur32(item, 0) as usize;
         let mut idx = hash % self.hashmap.len();
         //println!("Finding at initial index {}...", idx);
         self.tries += 1;
@@ -102,10 +104,8 @@ impl ConsistentHash {
     }
 }
 
-fn hash_32(item: &String) -> u32 {
-    let a = Sha256::digest(item);
-    let d: [u8; 4] = a[a.len() - 4..a.len()].try_into().unwrap();
-    u32::from_be_bytes(d)
+fn hash_mur32(item: &String, weight: u32) -> u32 {
+    murmur3_32(&mut Cursor::new(item), weight).expect("Could not hash!")
 }
 
 fn extract_disk(path: &str) -> u32 {
@@ -117,14 +117,13 @@ fn extract_disk(path: &str) -> u32 {
 }
 
 fn modulo_hash(file: &String, num_disks: u32) -> u32 {
-    hash_32(file) % num_disks
+    hash_mur32(file, 0) % num_disks
 }
 
 fn cons_add_disks(ch: &mut ConsistentHash, disks: u32, weight: u32) {
     for d in 0..disks {
         for w in 0..weight {
-            let path = format!("/{}-{:03}", d, w);
-            ch.add(path);
+            ch.add(&format!("/mnt/cache/{}", d), w);
         }
     }
 }
