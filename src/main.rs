@@ -39,6 +39,7 @@ impl ConsistentHash {
         let hash: usize = hash_32(item) as usize;
         let mut idx = hash % self.hashmap.len();
         //println!("Finding at initial index {}...", idx);
+        self.tries += 1;
         while self.hashmap[idx].is_empty() {
             idx += 1;
             if idx >= self.hashmap.len() {
@@ -71,7 +72,6 @@ impl ConsistentHash {
 }
 
 fn hash_32(item: &String) -> u32 {
-    //*Sha256::digest(item).last().unwrap() as u32
     let a = Sha256::digest(item);
     let d: [u8; 4] = a[a.len() - 4..a.len()].try_into().unwrap();
     u32::from_be_bytes(d)
@@ -198,12 +198,16 @@ fn main() {
         m_more_c,
         m_more_c * 100 / NUM_FILES
     );
-    for d in 0..(DISKS + 1) as usize {
+    for d in 0..(DISKS) as usize {
         println!(
             "Disk {}\t\t{}\t{}\t{}\t{}\t{}\t{}",
             d, c_nor_d[d], m_nor_d[d], c_less_d[d], m_less_d[d], c_more_d[d], m_more_d[d]
         );
     }
+    println!(
+        "Disk {}\t\t-\t-\t-\t-\t{}\t{}",
+        DISKS as usize, c_more_d[DISKS as usize], m_more_d[DISKS as usize]
+    );
     ch.print_stats();
     //println!("Hashmap: {:#?}", ch);
 }
