@@ -13,6 +13,8 @@ struct ConsistentHash {
     hashmap: Vec<String>,
     tries: i32,
     count: i32,
+    finalized: bool,
+    size: usize,
 }
 
 impl ConsistentHash {
@@ -22,10 +24,16 @@ impl ConsistentHash {
             hashmap: vec!["".to_string(); num as usize],
             tries: 0,
             count: 0,
+            finalized: false,
+            size: num as usize,
         }
     }
     pub fn add(&mut self, path: String) {
         //println!("INFO: Adding {}.", &path);
+        assert!(
+            !self.finalized,
+            "Can't add to a finalized set, drop and recreate."
+        );
         let hash = hash_32(&path);
         let mut idx: usize = hash as usize % self.hashmap.len();
         while !self.hashmap[idx].is_empty() {
@@ -33,6 +41,29 @@ impl ConsistentHash {
             idx += 1;
         }
         self.hashmap[idx] = path;
+    }
+    pub fn finalize(&mut self) {
+        let mut i = 0;
+        if self.hashmap[self.hashmap.len() - 1].is_empty() {
+            while self.hashmap[i].is_empty() {
+                i += 1;
+            }
+        } else {
+            i = self.hashmap.len() - 1;
+        }
+        let mut target = self.hashmap[i].to_string();
+        for i in (0..self.hashmap.len()).rev() {
+            if self.hashmap[i].is_empty() {
+                self.hashmap[i] = target.to_string();
+            } else {
+                target = self.hashmap[i].to_string();
+            }
+        }
+        self.finalized = true;
+    }
+    pub fn clear(&mut self) {
+        self.hashmap = vec!["".to_string(); self.size];
+        self.finalized = false;
     }
     pub fn find_entity(&mut self, item: &String) -> String {
         self.count += 1;
@@ -89,14 +120,19 @@ fn modulo_hash(file: &String, num_disks: u32) -> u32 {
     hash_32(file) % num_disks
 }
 
-fn main() {
-    let mut ch = ConsistentHash::new(DISKS * WEIGHT * VEC_MULT);
-    for d in 0..DISKS {
-        for w in 0..WEIGHT {
-            let path = format!("/mnt/cache/{}-{:03}", d, w);
+fn cons_add_disks(ch: &mut ConsistentHash, disks: u32, weight: u32) {
+    for d in 0..disks {
+        for w in 0..weight {
+            let path = format!("/{}-{:03}", d, w);
             ch.add(path);
         }
     }
+}
+
+fn main() {
+    let mut ch = ConsistentHash::new(DISKS * WEIGHT * VEC_MULT);
+    cons_add_disks(&mut ch, DISKS, WEIGHT);
+    ch.finalize();
     let mut files = Vec::with_capacity(NUM_FILES as usize);
     let mut c_nor = Vec::with_capacity(NUM_FILES as usize);
     let mut m_nor = Vec::with_capacity(NUM_FILES as usize);
@@ -134,6 +170,7 @@ fn main() {
     // Get the distribution if one device goes offline
     let rdisk = rand::thread_rng().gen_range(0..DISKS);
     ch.remove(&format!("/mnt/cache/{}", rdisk));
+    ch.finalize();
     for nf in 0..NUM_FILES as usize {
         let target = extract_disk(&ch.find_entity(&files[nf]));
         c_less.push(target);
@@ -150,15 +187,9 @@ fn main() {
     }
 
     // Get the distribution if one device is added to the normal set
-    // Re-add the removed device so that it fills in the original spots
-    // in case there was a collision.
-    for w in 0..WEIGHT {
-        ch.add(format!("/mnt/cache/{}-{:03}", rdisk, w));
-    }
-    // Add the new device, keep the WEIGHT the same.
-    for w in 0..WEIGHT {
-        ch.add(format!("/mnt/cache/{}-{:03}", DISKS, w));
-    }
+    ch.clear();
+    cons_add_disks(&mut ch, DISKS + 1, WEIGHT);
+    ch.finalize();
     for nf in 0..NUM_FILES as usize {
         let target = extract_disk(&ch.find_entity(&files[nf]));
         c_more.push(target);
