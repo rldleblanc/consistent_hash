@@ -8,6 +8,8 @@ const WEIGHT: u32 = 5;
 // DISK * WEIGHT * VEC_MULT = Vector size
 const VEC_MULT: u32 = 20;
 const NUM_FILES: u32 = 1000;
+// Limit the number of files displayed.
+const LIMIT_FILES: u32 = 100;
 
 #[derive(Debug)]
 struct ConsistentHash {
@@ -210,8 +212,13 @@ fn main() {
         NUM_FILES,
         NUM_FILES as f64 / DISKS as f64
     );
+    let mut num_files = NUM_FILES;
+    if NUM_FILES > LIMIT_FILES {
+        num_files = LIMIT_FILES;
+        println!("INFO: Only showing first {} files...", LIMIT_FILES);
+    }
     println!("File\t\tC\tM\tCl\tMl\tCm\tMm");
-    for nf in 0..NUM_FILES as usize {
+    for nf in 0..num_files as usize {
         println!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}",
             files[nf], c_nor[nf], m_nor[nf], c_less[nf], m_less[nf], c_more[nf], m_more[nf]
