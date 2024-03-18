@@ -9,36 +9,43 @@ const NUM_FILES: u32 = 100000000;
 // Limit the number of files displayed.
 const LIMIT_FILES: u32 = 100;
 
+struct FileData {
+    file: String,
+    consistent: u8,
+    modulo: u8,
+    lconsistent: u8,
+    lmodulo: u8,
+    mconsistent: u8,
+    mmodulo: u8,
+}
+
+#[derive(Clone, Default)]
+struct DiskData {
+    consistent: u32,
+    modulo: u32,
+    lconsistent: u32,
+    lmodulo: u32,
+    mconsistent: u32,
+    mmodulo: u32,
+}
+
 struct MyChash<'a> {
     ring: StaticHashRing<'a, u8, (), DefaultHash>,
-    bad_disks: Vec<u8>,
 }
 
 impl MyChash<'_> {
     pub fn new(disks: Vec<Node<u8, ()>>) -> MyChash<'static> {
         MyChash {
             ring: StaticHashRing::new(DefaultHash, disks.into_iter()),
-            bad_disks: Vec::new(),
         }
     }
 
-    pub fn fail_disk(&mut self, disk: u8) {
-        self.bad_disks.push(disk);
-        self.bad_disks.sort();
-    }
-
-    pub fn get_disk(&self, file: &String) -> Option<u8> {
-        for candidate in self.ring.calc_candidates(file) {
-            let disk = self.bad_disks.binary_search(&candidate.key);
-            match disk {
-                Err(_) => return Some(candidate.key),
-                _ => {
-                    //println!("Skipping failed disk {}!", candidate.key);
-                    continue;
-                }
-            };
-        }
-        None
+    pub fn get_disk(&self, file: &String) -> u8 {
+        self.ring
+            .calc_candidates(file)
+            .next()
+            .expect("No more disks!")
+            .key
     }
 }
 
@@ -51,85 +58,90 @@ fn modulo_hash(file: &String, num_disks: u8) -> u8 {
 }
 
 fn add_disks(nodes: &mut Vec<Node<u8, ()>>, disks: u8, weight: u8) {
+    add_disks_missing(nodes, disks, weight, None);
+}
+
+fn add_disks_missing(nodes: &mut Vec<Node<u8, ()>>, disks: u8, weight: u8, missing: Option<u8>) {
     for d in 0..disks {
+        match missing {
+            None => (),
+            Some(mis) => {
+                if mis == d {
+                    continue;
+                }
+            }
+        }
         nodes.push(Node::new(d).quantity(weight as usize));
     }
 }
 
 fn main() {
-    let mut nodes = Vec::new();
+    let mut nodes = Vec::<Node<u8, ()>>::new();
     add_disks(&mut nodes, DISKS, WEIGHT);
-    let mut my_ring = MyChash::new(nodes);
-    let mut files = Vec::with_capacity(NUM_FILES as usize);
-    let mut c_nor = Vec::with_capacity(NUM_FILES as usize);
-    let mut m_nor = Vec::with_capacity(NUM_FILES as usize);
-    let mut c_less = Vec::with_capacity(NUM_FILES as usize);
-    let mut m_less = Vec::with_capacity(NUM_FILES as usize);
-    let mut c_more = Vec::with_capacity(NUM_FILES as usize);
-    let mut m_more = Vec::with_capacity(NUM_FILES as usize);
-    let mut c_nor_d = vec![0; (DISKS + 1) as usize];
-    let mut m_nor_d = vec![0; (DISKS + 1) as usize];
-    let mut c_less_d = vec![0; (DISKS + 1) as usize];
-    let mut m_less_d = vec![0; (DISKS + 1) as usize];
-    let mut c_more_d = vec![0; (DISKS + 1) as usize];
-    let mut m_more_d = vec![0; (DISKS + 1) as usize];
+    let c_ring = MyChash::new(nodes);
+
+    let rdisk: u8 = rand::thread_rng().gen_range(0..DISKS);
+    println!("Removing disk: {}", rdisk);
+    //    my_ring.fail_disk(rdisk);
+    let mut nodes = Vec::new();
+    add_disks_missing(&mut nodes, DISKS + 1, WEIGHT, Some(rdisk));
+    let l_ring = MyChash::new(nodes);
+
+    let mut nodes = Vec::new();
+    add_disks(&mut nodes, DISKS + 1, WEIGHT);
+    let m_ring = MyChash::new(nodes);
+
+    let mut files: Vec<FileData> = Vec::with_capacity(NUM_FILES as usize);
+    let mut disks = vec![DiskData::default(); DISKS as usize + 1];
     let mut c_less_c = 0;
     let mut m_less_c = 0;
     let mut c_more_c = 0;
     let mut m_more_c = 0;
 
     // Get the distribution with normal devices online
-    for nf in 0..NUM_FILES as usize {
+    for _ in 0..NUM_FILES as usize {
         let s: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(15)
             .map(char::from)
             .collect();
-        files.push(s);
-        let target = my_ring.get_disk(&files[nf]).unwrap();
-        c_nor.push(target);
-        c_nor_d[target as usize] += 1;
-        let target = modulo_hash(&files[nf], DISKS);
-        m_nor.push(target);
-        m_nor_d[target as usize] += 1;
-    }
 
-    // Get the distribution if one device goes offline
-    let rdisk: u8 = rand::thread_rng().gen_range(0..DISKS);
-    println!("Removing disk: {}", rdisk);
-    my_ring.fail_disk(rdisk);
-    for nf in 0..NUM_FILES as usize {
-        let target = my_ring.get_disk(&files[nf]).unwrap();
-        c_less.push(target);
-        c_less_d[target as usize] += 1;
-        let target = modulo_hash(&files[nf], DISKS - 1);
-        m_less.push(target);
-        m_less_d[target as usize] += 1;
-        if c_less[nf] != c_nor[nf] {
+        let ctarget = c_ring.get_disk(&s);
+        let lctarget = l_ring.get_disk(&s);
+        let mctarget = m_ring.get_disk(&s);
+        disks[ctarget as usize].consistent += 1;
+        disks[lctarget as usize].lconsistent += 1;
+        disks[mctarget as usize].mconsistent += 1;
+
+        let mtarget = modulo_hash(&s, DISKS);
+        let lmtarget = modulo_hash(&s, DISKS - 1);
+        let mmtarget = modulo_hash(&s, DISKS + 1);
+        disks[mtarget as usize].modulo += 1;
+        disks[lmtarget as usize].modulo += 1;
+        disks[mmtarget as usize].modulo += 1;
+
+        if lctarget != ctarget {
             c_less_c += 1;
         }
-        if m_less[nf] != m_nor[nf] {
+        if lmtarget != mtarget {
             m_less_c += 1;
         }
-    }
-
-    // Get the distribution if one device is added to the normal set
-    let mut nodes = Vec::new();
-    add_disks(&mut nodes, DISKS + 1, WEIGHT);
-    let my_ring = MyChash::new(nodes);
-    for nf in 0..NUM_FILES as usize {
-        let target = my_ring.get_disk(&files[nf]).unwrap();
-        c_more.push(target);
-        c_more_d[target as usize] += 1;
-        let target = modulo_hash(&files[nf], DISKS + 1);
-        m_more.push(target);
-        m_more_d[target as usize] += 1;
-        if c_more[nf] != c_nor[nf] {
+        if mctarget != ctarget {
             c_more_c += 1;
         }
-        if m_more[nf] != m_nor[nf] {
+        if mmtarget != mtarget {
             m_more_c += 1;
         }
+
+        files.push(FileData {
+            file: s,
+            consistent: ctarget,
+            modulo: mtarget,
+            lconsistent: lctarget,
+            lmodulo: lmtarget,
+            mconsistent: mctarget,
+            mmodulo: mmtarget,
+        });
     }
 
     // Print out the staticstics
@@ -144,10 +156,16 @@ fn main() {
         println!("INFO: Only showing first {} files...", LIMIT_FILES);
     }
     println!("File\t\tC\tM\tCl\tMl\tCm\tMm");
-    for nf in 0..num_files as usize {
+    for file in files.iter().take(num_files as usize) {
         println!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            files[nf], c_nor[nf], m_nor[nf], c_less[nf], m_less[nf], c_more[nf], m_more[nf]
+            file.file,
+            file.consistent,
+            file.modulo,
+            file.lconsistent,
+            file.lmodulo,
+            file.mconsistent,
+            file.mmodulo
         );
     }
     println!(
@@ -161,14 +179,20 @@ fn main() {
         m_more_c,
         m_more_c * 100 / NUM_FILES
     );
-    for d in 0..(DISKS) as usize {
+    for (disk, info) in disks.iter().enumerate().take((DISKS) as usize) {
         println!(
             "Disk {}\t\t{}\t{}\t{}\t{}\t{}\t{}",
-            d, c_nor_d[d], m_nor_d[d], c_less_d[d], m_less_d[d], c_more_d[d], m_more_d[d]
+            disk,
+            info.consistent,
+            info.modulo,
+            info.lconsistent,
+            info.lmodulo,
+            info.mconsistent,
+            info.mmodulo
         );
     }
     println!(
         "Disk {}\t\t-\t-\t-\t-\t{}\t{}",
-        DISKS as usize, c_more_d[DISKS as usize], m_more_d[DISKS as usize]
+        DISKS as usize, disks[DISKS as usize].mconsistent, disks[DISKS as usize].mmodulo
     );
 }
